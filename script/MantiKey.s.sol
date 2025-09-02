@@ -18,8 +18,12 @@ contract MantiKeyScript is Script {
 
         vm.startBroadcast(privateKey);
 
+        address signer1Addr = vm.envAddress("SIGNER_1_ADDR");
+        address signer2Addr = vm.envAddress("SIGNER_2_ADDR");
+        address signer3Addr = vm.envAddress("SIGNER_3_ADDR");
+
         //Change them accordingly
-        MantiKey theContract = new MantiKey([0x75cd272dc35E2C79E4D79AE89533210F5B33ed55, 0x0de9bcCd8119877d924681A70F5f779f8eDd0B57, 0xc8dc7333A1532627A805e37186DbB1beB5b03539], 2);
+        MantiKey theContract = new MantiKey([signer1Addr, signer2Addr, signer3Addr], 2);
 
         vm.stopBroadcast();
     }

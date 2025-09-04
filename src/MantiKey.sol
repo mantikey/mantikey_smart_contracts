@@ -31,6 +31,7 @@ contract MantiKey is EIP712 {
         uint256 newThreshold;
         uint256 votes;
         bool executed;
+        uint256 deadline; // 7 days from creation
         mapping(address => bool) voted;
     }
 
@@ -46,10 +47,12 @@ contract MantiKey is EIP712 {
     bytes32 public constant PAUSE_TYPEHASH =
         keccak256("Pause(bool pause,uint256 nonce,uint256 deadline)");
 
+    uint256 public constant PROPOSAL_DURATION = 7 days;
+
     // ------------------------------------------------
     // Events
     // ------------------------------------------------
-    event ProposalCreated(uint256 indexed id, ProposalType pType, address target, uint256 newThr);
+    event ProposalCreated(uint256 indexed id, ProposalType pType, address target, uint256 newThr, uint256 deadline);
     event ProposalExecuted(uint256 indexed id);
     event Paused(address account);
     event Unpaused(address account);
@@ -184,14 +187,16 @@ contract MantiKey is EIP712 {
         uint256 pid = proposalCount++;
         Proposal storage p = proposals[pid];
         p.pType = ProposalType.Pause;
-        emit ProposalCreated(pid, ProposalType.Pause, address(0), 0);
+        p.deadline = block.timestamp + PROPOSAL_DURATION;
+        emit ProposalCreated(pid, ProposalType.Pause, address(0), 0, p.deadline);
     }
 
     function proposeUnpause() external onlySigner {
         uint256 pid = proposalCount++;
         Proposal storage p = proposals[pid];
         p.pType = ProposalType.Unpause;
-        emit ProposalCreated(pid, ProposalType.Unpause, address(0), 0);
+        p.deadline = block.timestamp + PROPOSAL_DURATION;
+        emit ProposalCreated(pid, ProposalType.Unpause, address(0), 0, p.deadline);
     }
 
     function proposeAddSigner(address newSigner) external onlySigner {
@@ -199,7 +204,8 @@ contract MantiKey is EIP712 {
         Proposal storage p = proposals[pid];
         p.pType = ProposalType.AddSigner;
         p.target = newSigner;
-        emit ProposalCreated(pid, ProposalType.AddSigner, newSigner, 0);
+        p.deadline = block.timestamp + PROPOSAL_DURATION;
+        emit ProposalCreated(pid, ProposalType.AddSigner, newSigner, 0, p.deadline);
     }
 
     function proposeRemoveSigner(address signer) external onlySigner {
@@ -207,7 +213,8 @@ contract MantiKey is EIP712 {
         Proposal storage p = proposals[pid];
         p.pType = ProposalType.RemoveSigner;
         p.target = signer;
-        emit ProposalCreated(pid, ProposalType.RemoveSigner, signer, 0);
+        p.deadline = block.timestamp + PROPOSAL_DURATION;
+        emit ProposalCreated(pid, ProposalType.RemoveSigner, signer, 0, p.deadline);
     }
 
     function proposeChangeThreshold(uint256 newThr) external onlySigner {
@@ -215,11 +222,13 @@ contract MantiKey is EIP712 {
         Proposal storage p = proposals[pid];
         p.pType = ProposalType.ChangeThreshold;
         p.newThreshold = newThr;
-        emit ProposalCreated(pid, ProposalType.ChangeThreshold, address(0), newThr);
+        p.deadline = block.timestamp + PROPOSAL_DURATION;
+        emit ProposalCreated(pid, ProposalType.ChangeThreshold, address(0), newThr, p.deadline);
     }
 
     function vote(uint256 proposalId) external onlySigner {
         Proposal storage p = proposals[proposalId];
+        require(block.timestamp <= p.deadline, "Proposal expired");
         require(!p.voted[msg.sender], "already");
         p.voted[msg.sender] = true;
         p.votes++;
@@ -228,6 +237,7 @@ contract MantiKey is EIP712 {
     function executeProposal(uint256 proposalId) external {
         Proposal storage p = proposals[proposalId];
         require(!p.executed, "done");
+        require(block.timestamp <= p.deadline, "Proposal expired");
         require(p.votes >= threshold, "not enough");
 
         p.executed = true;
@@ -251,6 +261,34 @@ contract MantiKey is EIP712 {
         }
 
         emit ProposalExecuted(proposalId);
+    }
+
+    // ------------------------------------------------
+    // View functions for proposals
+    // ------------------------------------------------
+    function getProposalInfo(uint256 proposalId) external view returns (
+        ProposalType pType,
+        address target,
+        uint256 newThreshold,
+        uint256 votes,
+        bool executed,
+        uint256 deadline,
+        bool expired
+    ) {
+        Proposal storage p = proposals[proposalId];
+        return (
+            p.pType,
+            p.target,
+            p.newThreshold,
+            p.votes,
+            p.executed,
+            p.deadline,
+            block.timestamp > p.deadline
+        );
+    }
+
+    function hasVoted(uint256 proposalId, address signer) external view returns (bool) {
+        return proposals[proposalId].voted[signer];
     }
 
     // ------------------------------------------------

@@ -14,15 +14,12 @@ contract MantiKey is EIP712 {
     uint256 public signerCount;
     uint256 public threshold;
 
-    uint256 public nonce; // shared for tx + pause/unpause
-    bool public paused;
-
+    uint256 public nonce; // shared for tx
+    
     enum ProposalType {
         AddSigner,
         RemoveSigner,
-        ChangeThreshold,
-        Pause,
-        Unpause
+        ChangeThreshold        
     }
 
     struct Proposal {
@@ -31,6 +28,7 @@ contract MantiKey is EIP712 {
         uint256 newThreshold;
         uint256 votes;
         bool executed;
+        uint256 createdAt;        
         uint256 deadline; // 7 days from creation
         mapping(address => bool) voted;
     }
@@ -44,9 +42,6 @@ contract MantiKey is EIP712 {
     bytes32 public constant TX_TYPEHASH =
         keccak256("Transaction(address to,uint256 value,bytes data,uint256 nonce,uint256 deadline)");
 
-    bytes32 public constant PAUSE_TYPEHASH =
-        keccak256("Pause(bool pause,uint256 nonce,uint256 deadline)");
-
     uint256 public constant PROPOSAL_DURATION = 7 days;
 
     // ------------------------------------------------
@@ -54,8 +49,6 @@ contract MantiKey is EIP712 {
     // ------------------------------------------------
     event ProposalCreated(uint256 indexed id, ProposalType pType, address target, uint256 newThr, uint256 deadline);
     event ProposalExecuted(uint256 indexed id);
-    event Paused(address account);
-    event Unpaused(address account);
 
     // ------------------------------------------------
     // Constructor
@@ -96,21 +89,6 @@ contract MantiKey is EIP712 {
         return _hashTypedDataV4(structHash);
     }
 
-    function getPauseHash(
-        bool _pause,
-        uint256 pauseNonce,
-        uint256 pauseDeadline
-    ) public view returns (bytes32) {
-        bytes32 structHash = keccak256(
-            abi.encode(
-                PAUSE_TYPEHASH,
-                _pause,
-                pauseNonce,
-                pauseDeadline
-            )
-        );
-        return _hashTypedDataV4(structHash);
-    }
 
     // ------------------------------------------------
     // Transaction execution
@@ -122,8 +100,7 @@ contract MantiKey is EIP712 {
         uint256 txNonce,
         uint256 deadline,
         bytes[] memory sigs
-    ) external {
-        require(!paused, "Contract is paused");
+    ) external {        
         require(txNonce == nonce, "bad nonce");
         require(block.timestamp <= deadline, "expired");
 
@@ -142,8 +119,7 @@ contract MantiKey is EIP712 {
         uint256 txNonce,
         uint256 deadline,
         bytes[] memory sigs
-    ) external view returns (bool, string memory) {
-        if (paused) return (false, "Contract is paused");
+    ) external view returns (bool, string memory) {        
         if (txNonce != nonce) return (false, "Invalid nonce");
         if (block.timestamp > deadline) return (false, "Deadline expired");
 
@@ -155,55 +131,17 @@ contract MantiKey is EIP712 {
         }
     }
 
-    // ------------------------------------------------
-    // Pause / Unpause via signatures
-    // ------------------------------------------------
-    function pause(bytes[] memory sigs) external {
-        require(!paused, "Already paused");
-        uint256 pNonce = nonce;
-        bytes32 digest = getPauseHash(true, pNonce, block.timestamp + 1 hours);
-        _checkSignatures(digest, sigs);
-
-        nonce++;
-        paused = true;
-        emit Paused(msg.sender);
-    }
-
-    function unpause(bytes[] memory sigs) external {
-        require(paused, "Already unpaused");
-        uint256 pNonce = nonce;
-        bytes32 digest = getPauseHash(false, pNonce, block.timestamp + 1 hours);
-        _checkSignatures(digest, sigs);
-
-        nonce++;
-        paused = false;
-        emit Unpaused(msg.sender);
-    }
 
     // ------------------------------------------------
-    // Governance proposals (pause/unpause + others)
-    // ------------------------------------------------
-    function proposePause() external onlySigner {
-        uint256 pid = proposalCount++;
-        Proposal storage p = proposals[pid];
-        p.pType = ProposalType.Pause;
-        p.deadline = block.timestamp + PROPOSAL_DURATION;
-        emit ProposalCreated(pid, ProposalType.Pause, address(0), 0, p.deadline);
-    }
-
-    function proposeUnpause() external onlySigner {
-        uint256 pid = proposalCount++;
-        Proposal storage p = proposals[pid];
-        p.pType = ProposalType.Unpause;
-        p.deadline = block.timestamp + PROPOSAL_DURATION;
-        emit ProposalCreated(pid, ProposalType.Unpause, address(0), 0, p.deadline);
-    }
+    // Governance proposals
+    // -----------------------------------------------
 
     function proposeAddSigner(address newSigner) external onlySigner {
         uint256 pid = proposalCount++;
         Proposal storage p = proposals[pid];
         p.pType = ProposalType.AddSigner;
         p.target = newSigner;
+        p.createdAt = block.timestamp;
         p.deadline = block.timestamp + PROPOSAL_DURATION;
         emit ProposalCreated(pid, ProposalType.AddSigner, newSigner, 0, p.deadline);
     }
@@ -213,6 +151,7 @@ contract MantiKey is EIP712 {
         Proposal storage p = proposals[pid];
         p.pType = ProposalType.RemoveSigner;
         p.target = signer;
+        p.createdAt = block.timestamp;
         p.deadline = block.timestamp + PROPOSAL_DURATION;
         emit ProposalCreated(pid, ProposalType.RemoveSigner, signer, 0, p.deadline);
     }
@@ -222,6 +161,7 @@ contract MantiKey is EIP712 {
         Proposal storage p = proposals[pid];
         p.pType = ProposalType.ChangeThreshold;
         p.newThreshold = newThr;
+        p.createdAt = block.timestamp;
         p.deadline = block.timestamp + PROPOSAL_DURATION;
         emit ProposalCreated(pid, ProposalType.ChangeThreshold, address(0), newThr, p.deadline);
     }
@@ -250,14 +190,6 @@ contract MantiKey is EIP712 {
             signerCount--;
         } else if (p.pType == ProposalType.ChangeThreshold) {
             threshold = p.newThreshold;
-        } else if (p.pType == ProposalType.Pause) {
-            require(!paused, "Already paused");
-            paused = true;
-            emit Paused(msg.sender);
-        } else if (p.pType == ProposalType.Unpause) {
-            require(paused, "Already unpaused");
-            paused = false;
-            emit Unpaused(msg.sender);
         }
 
         emit ProposalExecuted(proposalId);
@@ -272,6 +204,7 @@ contract MantiKey is EIP712 {
         uint256 newThreshold,
         uint256 votes,
         bool executed,
+        uint256 createdAt,
         uint256 deadline,
         bool expired
     ) {
@@ -282,6 +215,7 @@ contract MantiKey is EIP712 {
             p.newThreshold,
             p.votes,
             p.executed,
+            p.createdAt,
             p.deadline,
             block.timestamp > p.deadline
         );

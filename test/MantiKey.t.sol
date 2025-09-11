@@ -19,6 +19,7 @@ contract MantiKeyTest_Extended is Test {
     // fresh 4th signer (addr + pk)
     address signer4;
     uint256 signer4Pk;
+    
 
     address recipientA = makeAddr("recipientA");
     address recipientB = makeAddr("recipientB");
@@ -182,6 +183,91 @@ contract MantiKeyTest_Extended is Test {
             _arr2(SIGNER1_PRIVATE_KEY, SIGNER2_PRIVATE_KEY)
         );
         assertEq(recipientA.balance, balA0 + 0.4 ether, "recipientA +0.4 ETH");
+    }
+
+     function testGetAllSigners() public {
+        // Test initial signers
+        address[] memory signers = multiSig.getAllSigners();
+        
+        assertEq(signers.length, 3);
+        assertEq(signers[0], signer1);
+        assertEq(signers[1], signer2);
+        assertEq(signers[2], signer3);
+        
+        // Verify all returned addresses are actually signers
+        for (uint256 i = 0; i < signers.length; i++) {
+            assertTrue(multiSig.isSigner(signers[i]));
+        }
+    }
+
+
+     function testGetAllSignersAfterAddingSigner() public {
+        address newSigner = address(0x4);
+        // Create and execute proposal to add a new signer
+        vm.prank(signer1);
+        multiSig.proposeAddSigner(newSigner);
+        
+        // Vote on the proposal
+        vm.prank(signer1);
+        multiSig.vote(0);
+        vm.prank(signer2);
+        multiSig.vote(0);
+        
+        // Execute the proposal
+        multiSig.executeProposal(0);
+        
+        // Check updated signers list
+        address[] memory signers = multiSig.getAllSigners();
+        assertEq(signers.length, 4);
+        
+        // Verify the new signer is included
+        bool newSignerFound = false;
+        for (uint256 i = 0; i < signers.length; i++) {
+            if (signers[i] == newSigner) {
+                newSignerFound = true;
+                break;
+            }
+        }
+        assertTrue(newSignerFound);
+        assertTrue(multiSig.isSigner(newSigner));
+    }
+
+    function testGetAllSignersAfterRemovingSigner() public {
+        // Create and execute proposal to remove a signer
+        vm.prank(signer1);
+        multiSig.proposeRemoveSigner(signer3);
+        
+        // Vote on the proposal
+        vm.prank(signer1);
+        multiSig.vote(0);
+        vm.prank(signer2);
+        multiSig.vote(0);
+        
+        // Execute the proposal
+        multiSig.executeProposal(0);
+        
+        // Check updated signers list
+        address[] memory signers = multiSig.getAllSigners();
+        assertEq(signers.length, 2);
+        
+        // Verify the removed signer is not included
+        for (uint256 i = 0; i < signers.length; i++) {
+            assertFalse(signers[i] == signer3);
+        }
+        
+        // Verify signer3 is no longer a signer
+        assertFalse(multiSig.isSigner(signer3));
+        
+        // Verify remaining signers are still there
+        bool signer1Found = false;
+        bool signer2Found = false;
+        for (uint256 i = 0; i < signers.length; i++) {
+            if (signers[i] == signer1) signer1Found = true;
+            if (signers[i] == signer2) signer2Found = true;
+        }
+        assertTrue(signer1Found || signer2Found); // At least one should be found
+        assertTrue(multiSig.isSigner(signer1));
+        assertTrue(multiSig.isSigner(signer2));
     }
 
     // utility arrays

@@ -10,8 +10,8 @@ contract MantiKey is EIP712 {
     // ------------------------------------------------
     // Storage
     // ------------------------------------------------
+    address[] public signers;
     mapping(address => bool) public isSigner;
-    uint256 public signerCount;
     uint256 public threshold;
 
     uint256 public nonce; // shared for tx
@@ -53,15 +53,14 @@ contract MantiKey is EIP712 {
     // ------------------------------------------------
     // Constructor
     // ------------------------------------------------
-    constructor(address[3] memory signers, uint256 initialThreshold)
+    constructor(address[3] memory initialSigners, uint256 initialThreshold)
         EIP712("MantiKey", "1")
-    {
-        require(initialThreshold > 0, "thr 0");
-        for (uint256 i = 0; i < signers.length; i++) {
-            require(signers[i] != address(0), "zero");
-            require(!isSigner[signers[i]], "dup");
-            isSigner[signers[i]] = true;
-            signerCount++;
+    {        require(initialThreshold > 0, "invalid threhold");
+        for (uint256 i = 0; i < initialSigners.length; i++) {
+            require(initialSigners[i] != address(0), "zero");
+            require(!isSigner[initialSigners[i]], "duplicated signer");
+            signers.push(initialSigners[i]);
+            isSigner[initialSigners[i]] = true;
         }
         threshold = initialThreshold;
     }
@@ -88,7 +87,6 @@ contract MantiKey is EIP712 {
         );
         return _hashTypedDataV4(structHash);
     }
-
 
     // ------------------------------------------------
     // Transaction execution
@@ -131,12 +129,14 @@ contract MantiKey is EIP712 {
         }
     }
 
-
     // ------------------------------------------------
     // Governance proposals
     // -----------------------------------------------
 
     function proposeAddSigner(address newSigner) external onlySigner {
+        require(!isSigner[newSigner], "already signer");
+        require(newSigner != address(0), "zero address");
+        
         uint256 pid = proposalCount++;
         Proposal storage p = proposals[pid];
         p.pType = ProposalType.AddSigner;
@@ -147,6 +147,9 @@ contract MantiKey is EIP712 {
     }
 
     function proposeRemoveSigner(address signer) external onlySigner {
+        require(isSigner[signer], "not a signer");
+        require(signers.length > 1, "cannot remove last signer");
+        
         uint256 pid = proposalCount++;
         Proposal storage p = proposals[pid];
         p.pType = ProposalType.RemoveSigner;
@@ -157,6 +160,9 @@ contract MantiKey is EIP712 {
     }
 
     function proposeChangeThreshold(uint256 newThr) external onlySigner {
+        require(newThr > 0, "threshold must be > 0");
+        require(newThr <= signers.length, "threshold too high");
+        
         uint256 pid = proposalCount++;
         Proposal storage p = proposals[pid];
         p.pType = ProposalType.ChangeThreshold;
@@ -169,7 +175,7 @@ contract MantiKey is EIP712 {
     function vote(uint256 proposalId) external onlySigner {
         Proposal storage p = proposals[proposalId];
         require(block.timestamp <= p.deadline, "Proposal expired");
-        require(!p.voted[msg.sender], "already");
+        require(!p.voted[msg.sender], "already voted");
         p.voted[msg.sender] = true;
         p.votes++;
     }
@@ -183,16 +189,32 @@ contract MantiKey is EIP712 {
         p.executed = true;
 
         if (p.pType == ProposalType.AddSigner) {
+            signers.push(p.target);
             isSigner[p.target] = true;
-            signerCount++;
         } else if (p.pType == ProposalType.RemoveSigner) {
-            isSigner[p.target] = false;
-            signerCount--;
+            _removeSigner(p.target);
         } else if (p.pType == ProposalType.ChangeThreshold) {
             threshold = p.newThreshold;
         }
 
         emit ProposalExecuted(proposalId);
+    }
+
+    // ------------------------------------------------
+    // Internal helper to remove signer
+    // ------------------------------------------------
+    function _removeSigner(address signer) internal {
+        isSigner[signer] = false;
+        
+        // Find the signer in the array and remove it
+        for (uint256 i = 0; i < signers.length; i++) {
+            if (signers[i] == signer) {
+                // Move the last element to this position and pop
+                signers[i] = signers[signers.length - 1];
+                signers.pop();
+                break;
+            }
+        }
     }
 
     // ------------------------------------------------
@@ -226,12 +248,25 @@ contract MantiKey is EIP712 {
     }
 
     // ------------------------------------------------
+    // View all signers
+    // ------------------------------------------------
+    function getAllSigners() external view returns (address[] memory) {
+        return signers;
+    }
+
+    // ------------------------------------------------
+    // Getter for signer count
+    // ------------------------------------------------
+    function signerCount() external view returns (uint256) {
+        return signers.length;
+    }
+
+    // ------------------------------------------------
     // Internal signature check (order-agnostic)
     // ------------------------------------------------
     function _checkSignatures(bytes32 digest, bytes[] memory sigs) internal view {
         require(sigs.length >= threshold, "Not enough signatures");
 
-        
         address[] memory seen = new address[](sigs.length);
         uint256 seenCount = 0;
 

@@ -1,6 +1,6 @@
 ## MantiKey Smart Contracts
 
-Latest version: https://sepolia.etherscan.io/address/0x4f507d7cf616ea86fc0520568d446af9099edf7f
+Latest version: https://sepolia.etherscan.io/address/0x642428Fb30F15aF591059619828d81bC40ada874
 
 ### Build
 

@@ -3,9 +3,12 @@ pragma solidity ^0.8.26;
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract MantiKey is EIP712 {
     using ECDSA for bytes32;
+    using SafeERC20 for IERC20;
 
     // ------------------------------------------------
     // Storage
@@ -49,6 +52,8 @@ contract MantiKey is EIP712 {
     // ------------------------------------------------
     event ProposalCreated(uint256 indexed id, ProposalType pType, address target, uint256 newThr, uint256 deadline);
     event ProposalExecuted(uint256 indexed id);
+    event MultiSendETH(address indexed sender, uint256 totalAmount, uint256 recipients);
+    event MultiSendERC20(address indexed sender, address indexed token, uint256 totalAmount, uint256 recipients);
 
     // ------------------------------------------------
     // Constructor
@@ -198,6 +203,94 @@ contract MantiKey is EIP712 {
         }
 
         emit ProposalExecuted(proposalId);
+    }
+
+    // ------------------------------------------------
+    // Multisends
+    // ------------------------------------------------
+    // -------------------------
+    /// ETH multisend
+    /// -------------------------
+    /// @param recipients list of recipients
+    /// @param amounts list of ETH amounts per recipient
+    /// @param pullFromSender if true, ETH must be sent in msg.value;
+    ///        if false, ETH comes from the contract’s existing balance
+    function multisendETH(
+        address[] calldata recipients,
+        uint256[] calldata amounts,
+        bool pullFromSender
+    ) external payable {
+        uint256 len = recipients.length;
+        require(len > 0, "No recipients");
+        require(len == amounts.length, "Length mismatch");
+
+        uint256 computedTotal = 0;
+        for (uint256 i = 0; i < len; ) {
+            computedTotal += amounts[i];
+            unchecked { ++i; }
+        }
+
+        if (pullFromSender) {
+            require(msg.value == computedTotal, "Incorrect msg.value");
+        } else {
+            require(address(this).balance >= computedTotal, "Insufficient contract ETH");
+        }
+
+        for (uint256 i = 0; i < len; ) {
+            uint256 value = amounts[i];
+            if (value > 0) {
+                (bool ok, ) = payable(recipients[i]).call{value: value}("");
+                require(ok, "ETH transfer failed");
+            }
+            unchecked { ++i; }
+        }
+
+        emit MultiSendETH(msg.sender, computedTotal, len);
+    }
+
+    /// -------------------------
+    /// ERC20 multisend
+    /// -------------------------
+    /// @param token ERC20 token
+    /// @param recipients list of recipients
+    /// @param amounts list of amounts per recipient
+    /// @param pullFromSender if true, pulls tokens from msg.sender via transferFrom;
+    ///        if false, sends from the contract’s balance
+    function multisendERC20(
+        IERC20 token,
+        address[] calldata recipients,
+        uint256[] calldata amounts,
+        bool pullFromSender
+    ) external {
+        uint256 len = recipients.length;
+        require(len > 0, "No recipients");
+        require(len == amounts.length, "Length mismatch");
+
+        uint256 computedTotal = 0;
+        for (uint256 i = 0; i < len; ) {
+            computedTotal += amounts[i];
+            unchecked { ++i; }
+        }
+
+        if (pullFromSender) {
+            for (uint256 i = 0; i < len; ) {
+                uint256 value = amounts[i];
+                if (value > 0) {
+                    token.safeTransferFrom(msg.sender, recipients[i], value);
+                }
+                unchecked { ++i; }
+            }
+        } else {
+            for (uint256 i = 0; i < len; ) {
+                uint256 value = amounts[i];
+                if (value > 0) {
+                    token.safeTransfer(recipients[i], value);
+                }
+                unchecked { ++i; }
+            }
+        }
+
+        emit MultiSendERC20(msg.sender, address(token), computedTotal, len);
     }
 
     // ------------------------------------------------
